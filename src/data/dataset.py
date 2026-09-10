@@ -105,33 +105,41 @@ class RumikTTSDataset(Dataset):
         processed_items = []
         with open(transcript_csv, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
-            for row in reader:
-                audio_name = row.get("audio_path") or row.get("filename") or row.get("file")
-                transcript = row.get("transcript") or row.get("text") or row.get("sentence")
-                speaker_id = row.get("speaker_id", "default_speaker")
-                
-                full_audio_path = os.path.join(data_dir, audio_name) if not os.path.isabs(audio_name) else audio_name
-                if not os.path.exists(full_audio_path):
-                    # check if direct relative path
-                    if os.path.exists(audio_name):
-                        full_audio_path = audio_name
-                    else:
-                        print(f"[!] Skipping missing audio file: {full_audio_path}")
-                        continue
+            rows = list(reader)
 
-                # Preprocess audio (24kHz mono, VAD trim)
-                waveform = preprocessor.load_and_preprocess(full_audio_path)
-                
-                # Encode through frozen Mimi
-                audio_codes = preprocessor.encode_with_mimi(waveform, mimi_model=mimi_model, device=device)
-                
-                processed_items.append({
-                    "audio_path": full_audio_path,
-                    "transcript": transcript,
-                    "speaker_id": speaker_id,
-                    "audio_codes": audio_codes.tolist(),
-                    "duration_sec": waveform.shape[-1] / 24000.0
-                })
+        print(f"[*] Found {len(rows)} audio transcript entries. Starting preprocessing...")
+        from tqdm import tqdm
+        progress = tqdm(rows, desc="Processing Audio (24kHz + Mimi RVQ)", unit="file")
+        
+        for row in progress:
+            audio_name = row.get("audio_path") or row.get("filename") or row.get("file")
+            transcript = row.get("transcript") or row.get("text") or row.get("sentence")
+            speaker_id = row.get("speaker_id", "default_speaker")
+            
+            full_audio_path = os.path.join(data_dir, audio_name) if not os.path.isabs(audio_name) else audio_name
+            if not os.path.exists(full_audio_path):
+                # check if direct relative path
+                if os.path.exists(audio_name):
+                    full_audio_path = audio_name
+                else:
+                    progress.write(f"[!] Skipping missing audio file: {full_audio_path}")
+                    continue
+
+            # Preprocess audio (24kHz mono, VAD trim)
+            waveform = preprocessor.load_and_preprocess(full_audio_path)
+            
+            # Encode through frozen Mimi
+            audio_codes = preprocessor.encode_with_mimi(waveform, mimi_model=mimi_model, device=device)
+            
+            duration = waveform.shape[-1] / 24000.0
+            processed_items.append({
+                "audio_path": full_audio_path,
+                "transcript": transcript,
+                "speaker_id": speaker_id,
+                "audio_codes": audio_codes.tolist(),
+                "duration_sec": duration
+            })
+            progress.set_postfix({"processed": len(processed_items), "dur_s": f"{duration:.1f}"})
 
         # Train / Validation Split
         n_total = len(processed_items)
@@ -153,7 +161,8 @@ class RumikTTSDataset(Dataset):
             raise ImportError("HuggingFace 'datasets' library is not installed.")
             
         data_records = []
-        for i in range(len(self)):
+        from tqdm import tqdm
+        for i in tqdm(range(len(self)), desc="Formatting HuggingFace Dataset", unit="sample"):
             sample = self[i]
             data_records.append({
                 "input_ids": sample["input_ids"].tolist(),
