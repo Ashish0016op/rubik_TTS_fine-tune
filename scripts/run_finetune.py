@@ -29,8 +29,9 @@ def run_finetuning(
     data_dir: str = "data/processed",
     output_dir: str = "checkpoints/rumik_lora_custom_voice",
     model_id: str = "rumik-ai/rumik-oss-1",
-    epochs: int = 3,
-    batch_size: int = 2,
+    epochs: int = 15,
+    batch_size: int = 1,
+    grad_accum: int = 4,
     lr: float = 2e-4,
     lora_r: int = 16,
     enable_speaker_conditioning: bool = False,
@@ -45,6 +46,8 @@ def run_finetuning(
     print(f"[*] Base Model ID      : {model_id}")
     print(f"[*] Epochs             : {epochs}")
     print(f"[*] Batch Size         : {batch_size}")
+    print(f"[*] Grad Accum Steps   : {grad_accum}")
+    print(f"[*] Effective Batch    : {batch_size * grad_accum}")
     print(f"[*] Learning Rate      : {lr}")
     print(f"[*] LoRA Rank (r)      : {lora_r}")
     print(f"[*] Speaker Module     : {enable_speaker_conditioning}")
@@ -167,11 +170,10 @@ def run_finetuning(
                 tuner.save_checkpoint(output_dir, clean_existing=True)
 
         print("\n[+] Phase 3 fine-tuning successfully verified! Single checkpoint preserved.")
-        return
-
     # Real GPU Fine-Tuning
     print(f"[*] Loading live checkpoint {model_id} for LoRA fine-tuning on {device}...")
-    wrapper = RumikModelWrapper.load(model_id, device=device)
+    # Do not load Mimi codec onto GPU during fine-tuning (saves ~1.5 GB VRAM)
+    wrapper = RumikModelWrapper.load(model_id, device=device, load_mimi=False)
     train_ds = RumikTTSDataset(train_records, wrapper.tokenizer)
     val_ds = RumikTTSDataset(val_records, wrapper.tokenizer)
 
@@ -188,7 +190,10 @@ def run_finetuning(
         output_dir=output_dir,
         learning_rate=lr,
         num_train_epochs=epochs,
-        batch_size=batch_size
+        batch_size=batch_size,
+        gradient_accumulation_steps=grad_accum,
+        gradient_checkpointing=True,
+        bf16=True
     )
     lora_cfg = LoRAConfig(r=lora_r)
 
@@ -220,8 +225,9 @@ if __name__ == "__main__":
     parser.add_argument("--data-dir", type=str, default="data/processed")
     parser.add_argument("--output-dir", type=str, default="checkpoints/rumik_lora_custom_voice")
     parser.add_argument("--model-id", type=str, default="rumik-ai/rumik-oss-1")
-    parser.add_argument("--epochs", type=int, default=2)
-    parser.add_argument("--batch-size", type=int, default=2)
+    parser.add_argument("--epochs", type=int, default=15)
+    parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--grad-accum", type=int, default=4)
     parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--speaker-conditioning", action="store_true")
@@ -235,6 +241,7 @@ if __name__ == "__main__":
         model_id=args.model_id,
         epochs=args.epochs,
         batch_size=args.batch_size,
+        grad_accum=args.grad_accum,
         lr=args.lr,
         lora_r=args.lora_r,
         enable_speaker_conditioning=args.speaker_conditioning,

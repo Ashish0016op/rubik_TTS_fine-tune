@@ -51,9 +51,12 @@ class TrainingConfig:
     learning_rate: float = 2e-4
     warmup_ratio: float = 0.05
     weight_decay: float = 0.01
-    batch_size: int = 2
+    batch_size: int = 1
     gradient_accumulation_steps: int = 4
     num_train_epochs: int = 15
+    gradient_checkpointing: bool = True
+    bf16: bool = True
+    fp16: bool = False
     max_steps: int = -1
     eval_steps: int = 50
     save_steps: int = 100

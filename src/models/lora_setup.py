@@ -53,19 +53,35 @@ def apply_lora_to_rumik(
     r: int = 16,
     lora_alpha: int = 32,
     lora_dropout: float = 0.05,
-    target_modules: Optional[List[str]] = None
+    target_modules: Optional[List[str]] = None,
+    enable_gradient_checkpointing: bool = True
 ) -> nn.Module:
     """Applies LoRA to the transformer backbone while keeping Mimi codec completely frozen."""
     # Ensure all base model parameters are frozen
     for p in model.parameters():
         p.requires_grad = False
 
+    # If model is a wrapper, get the internal transformer
+    transformer = getattr(model, "transformer", model)
+
+    # Enable gradient checkpointing to drastically reduce activation VRAM during training
+    if enable_gradient_checkpointing:
+        if hasattr(transformer, "gradient_checkpointing_enable"):
+            try:
+                transformer.gradient_checkpointing_enable()
+            except Exception as e:
+                print(f"[!] Note on gradient checkpointing: {e}")
+        if hasattr(transformer, "enable_input_require_grads"):
+            try:
+                transformer.enable_input_require_grads()
+            except Exception as e:
+                pass
+        if hasattr(transformer, "config"):
+            transformer.config.use_cache = False
+
     if get_peft_model is None:
         print("[!] Warning: PEFT not installed. Using un-adapted PyTorch model.")
         return model
-
-    # If model is a wrapper, apply LoRA to the internal transformer
-    transformer = getattr(model, "transformer", model)
 
     lora_config = get_rumik_lora_config(
         r=r,

@@ -40,7 +40,8 @@ class RumikFineTuner:
             r=self.lora_cfg.r,
             lora_alpha=self.lora_cfg.lora_alpha,
             lora_dropout=self.lora_cfg.lora_dropout,
-            target_modules=self.lora_cfg.target_modules
+            target_modules=self.lora_cfg.target_modules,
+            enable_gradient_checkpointing=self.train_cfg.gradient_checkpointing
         )
         print_trainable_parameters(self.model)
 
@@ -76,6 +77,11 @@ class RumikFineTuner:
         self.optimizer.zero_grad()
 
         replay_iter = iter(replay_dataloader) if replay_dataloader else None
+        
+        # AMP Mixed Precision setup
+        use_amp = self.device.startswith("cuda")
+        amp_dtype = torch.bfloat16 if (use_amp and torch.cuda.is_bf16_supported() and self.train_cfg.bf16) else (torch.float16 if self.train_cfg.fp16 else torch.float32)
+        has_stop_head = hasattr(self.wrapper, "stop_head") and self.wrapper.stop_head is not None
 
         progress_bar = tqdm(dataloader, desc=f"Epoch {epoch}")
         for step, batch in enumerate(progress_bar):
@@ -95,30 +101,32 @@ class RumikFineTuner:
                 labels = replay_batch["labels"].to(self.device)
                 attention_mask = replay_batch["attention_mask"].to(self.device)
 
-            # Forward pass
-            outputs = self.wrapper.transformer(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                output_hidden_states=True
-            )
-            logits = outputs.logits
+            # Forward pass with AMP autocast
+            with torch.autocast(device_type="cuda" if self.device.startswith("cuda") else "cpu", dtype=amp_dtype, enabled=use_amp):
+                outputs = self.wrapper.transformer(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    output_hidden_states=has_stop_head
+                )
+                logits = outputs.logits
 
-            # Stop head predictions
-            stop_logits = None
-            if hasattr(self.wrapper, "stop_head") and self.wrapper.stop_head is not None:
-                last_hidden = outputs.hidden_states[-1] if hasattr(outputs, "hidden_states") else None
-                if last_hidden is not None:
-                    stop_logits = self.wrapper.stop_head(last_hidden)
+                # Stop head predictions
+                stop_logits = None
+                if has_stop_head:
+                    last_hidden = outputs.hidden_states[-1] if hasattr(outputs, "hidden_states") else None
+                    if last_hidden is not None:
+                        stop_logits = self.wrapper.stop_head(last_hidden)
 
-            loss, metrics = self.criterion(
-                lm_logits=logits,
-                labels=labels,
-                stop_logits=stop_logits,
-                stop_labels=batch.get("stop_labels")
-            )
+                loss, metrics = self.criterion(
+                    lm_logits=logits,
+                    labels=labels,
+                    stop_logits=stop_logits,
+                    stop_labels=batch.get("stop_labels")
+                )
 
-            # Normalize for gradient accumulation
-            loss = loss / self.train_cfg.gradient_accumulation_steps
+                # Normalize for gradient accumulation
+                loss = loss / self.train_cfg.gradient_accumulation_steps
+
             loss.backward()
 
             if (step + 1) % self.train_cfg.gradient_accumulation_steps == 0 or (step + 1) == len(dataloader):
@@ -126,9 +134,12 @@ class RumikFineTuner:
                 self.optimizer.step()
                 self.optimizer.zero_grad()
 
-            total_loss += metrics["total_loss"]
+            total_loss += metrics["token_loss"] if "token_loss" in metrics else metrics.get("total_loss", 0.0)
             steps += 1
-            progress_bar.set_postfix({"loss": f"{metrics['total_loss']:.4f}"})
+            progress_bar.set_postfix({"loss": f"{metrics.get('token_loss', 0.0):.4f}"})
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         avg_loss = total_loss / max(1, steps)
         return {"avg_train_loss": avg_loss}
@@ -140,32 +151,40 @@ class RumikFineTuner:
         total_loss = 0.0
         steps = 0
 
+        use_amp = self.device.startswith("cuda")
+        amp_dtype = torch.bfloat16 if (use_amp and torch.cuda.is_bf16_supported() and self.train_cfg.bf16) else (torch.float16 if self.train_cfg.fp16 else torch.float32)
+        has_stop_head = hasattr(self.wrapper, "stop_head") and self.wrapper.stop_head is not None
+
         for batch in val_dataloader:
             input_ids = batch["input_ids"].to(self.device)
             labels = batch["labels"].to(self.device)
             attention_mask = batch["attention_mask"].to(self.device)
 
-            outputs = self.wrapper.transformer(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                output_hidden_states=True
-            )
-            logits = outputs.logits
+            with torch.autocast(device_type="cuda" if self.device.startswith("cuda") else "cpu", dtype=amp_dtype, enabled=use_amp):
+                outputs = self.wrapper.transformer(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    output_hidden_states=has_stop_head
+                )
+                logits = outputs.logits
 
-            stop_logits = None
-            if hasattr(self.wrapper, "stop_head") and self.wrapper.stop_head is not None:
-                last_hidden = outputs.hidden_states[-1] if hasattr(outputs, "hidden_states") else None
-                if last_hidden is not None:
-                    stop_logits = self.wrapper.stop_head(last_hidden)
+                stop_logits = None
+                if has_stop_head:
+                    last_hidden = outputs.hidden_states[-1] if hasattr(outputs, "hidden_states") else None
+                    if last_hidden is not None:
+                        stop_logits = self.wrapper.stop_head(last_hidden)
 
-            loss, metrics = self.criterion(
-                lm_logits=logits,
-                labels=labels,
-                stop_logits=stop_logits,
-                stop_labels=batch.get("stop_labels")
-            )
-            total_loss += metrics["total_loss"]
+                loss, metrics = self.criterion(
+                    lm_logits=logits,
+                    labels=labels,
+                    stop_logits=stop_logits,
+                    stop_labels=batch.get("stop_labels")
+                )
+            total_loss += metrics.get("token_loss", metrics.get("total_loss", 0.0))
             steps += 1
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         avg_val_loss = total_loss / max(1, steps)
         return {"val_loss": avg_val_loss}

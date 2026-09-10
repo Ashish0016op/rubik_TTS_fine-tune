@@ -52,7 +52,13 @@ class RumikTTSLoss(nn.Module):
         flat_logits = shift_logits.view(-1, vocab_size)
         flat_labels = shift_labels.view(-1)
         
-        token_loss = self.ce_loss(flat_logits, flat_labels)
+        active_mask = (flat_labels != -100)
+        if active_mask.any():
+            active_logits = flat_logits[active_mask]
+            active_labels = flat_labels[active_mask]
+            token_loss = F.cross_entropy(active_logits, active_labels)
+        else:
+            token_loss = torch.tensor(0.0, device=lm_logits.device, requires_grad=True)
 
         # Stop head loss
         total_loss = token_loss
