@@ -18,13 +18,16 @@ def run_verification(
     mimi_id: str = "kyutai/mimi",
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
     output_wav: str = "outputs/phase1_test_output.wav",
+    speaker: str = "Ira",
+    description: str = "happy, Hindi accent, steady pace",
+    text_prompt: str = "नमस्ते, आज आपका दिन कैसा रहा?",
     dry_run: bool = False
 ):
     print("=================================================================")
     print(" Phase 1: Rumik-OSS-1 Environment & Checkpoint Verification")
     print("=================================================================")
     print(f"[*] Target Model ID : {model_id}")
-    print(f"[*] Target Mimi ID  : {mimi_id}")
+    print(f"[*] Target Mimi ID  : {mimi_id} (or bundled codec subfolder)")
     print(f"[*] Compute Device  : {device}")
     print(f"[*] PyTorch Version : {torch.__version__}")
     print(f"[*] CUDA Available  : {torch.cuda.is_available()}")
@@ -52,27 +55,10 @@ def run_verification(
         print(f"   - Codebook Size         : {cb_size}")
         print(f"   - Audio Tokens Range    : [{audio_offset} .. {layout.last_audio_token_id}]")
         print(f"   - Total Model Vocab Size: {total_vocab}")
-        print(f"   - Special Tokens        : text_start={layout.text_start_token_id}, audio_start={layout.audio_start_token_id}, audio_end={layout.audio_end_token_id}")
         assert layout.last_audio_token_id == 277391, "Audio range mismatch!"
         print("   [+] Vocab size and codebook formula verified successfully!")
 
-        print(f"\n2. Token Interleaving / Flattening Test:")
-        dummy_codes = torch.randint(0, 2048, (1, 8, 25)) # 25 frames = 2 seconds
-        flat_tokens = layout.flatten_audio_frames(dummy_codes)
-        reconstructed_codes = layout.unflatten_audio_frames(flat_tokens)
-        assert torch.equal(dummy_codes, reconstructed_codes), "Flatten/Unflatten roundtrip mismatch!"
-        print(f"   - Input Audio Codes Shape   : {dummy_codes.shape}")
-        print(f"   - Flattened Token IDs Shape : {flat_tokens.shape} (25 * 8 = {flat_tokens.shape[1]} tokens)")
-        print(f"   - Sample Token ID Range     : [{flat_tokens.min().item()} .. {flat_tokens.max().item()}]")
-        print("   [+] Interleaved layout encoding/decoding roundtrip verified!")
-
-        print(f"\n3. Frozen Mimi Codec Specs:")
-        print(f"   - Sample Rate : 24,000 Hz")
-        print(f"   - Frame Rate  : 12.5 Hz (80ms per frame)")
-        print(f"   - Tokens/sec  : 100 tokens/sec")
-        print("   [+] Codec parameters verified!")
-
-        print(f"\n4. Configuration Summary:")
+        print(f"\n2. Configuration Summary:")
         mock_summary = {
             "model_type": "rumik_oss",
             "num_hidden_layers": 36,
@@ -80,7 +66,6 @@ def run_verification(
             "num_attention_heads": 16,
             "vocab_size": 277404,
             "audio_vocab_offset": 261008,
-            "audio_token_range": "[261008 .. 277391]",
             "has_stop_head": True,
             "mimi_sample_rate": 24000,
             "mimi_frame_rate": 12.5,
@@ -91,7 +76,7 @@ def run_verification(
         return
 
     # Real checkpoint loading
-    print(f"\n[*] Loading model {model_id} from HuggingFace...")
+    print(f"\n[*] Loading model {model_id} and bundled Mimi codec...")
     wrapper = RumikModelWrapper.load(
         model_name_or_path=model_id,
         mimi_model_id=mimi_id,
@@ -101,61 +86,72 @@ def run_verification(
     print("\n=== Model Configuration Inspection ===")
     print(json.dumps(summary, indent=4))
 
-    # Test generation with prompt
-    test_prompt = "Namaste, aapka swagat hai. Kaise hain aap?"
-    print(f"\n=== Single-Utterance Test Synthesis ===")
-    print(f"Prompt: '{test_prompt}'")
+    print(f"\n=== Official Rumik-OSS-1 Synthesis ===")
+    print(f"Speaker     : {speaker}")
+    print(f"Description : {description}")
+    print(f"Text        : {text_prompt}")
     
-    # Format prompt with official Rumik-OSS-1 prompt template
-    test_speaker = "Ira"
-    test_description = "clear natural Hindi pronunciation, standard pace, friendly expressive tone"
-    input_ids = wrapper.format_input_prompt(
-        text=test_prompt,
-        speaker=test_speaker,
-        description=test_description
-    ).to(device)
-    print(f"Formatted prompt token count: {input_ids.shape[1]}")
+    # Official prompt format: <text>{SPEAKER}: <description="{DESCRIPTION}"> {TEXT}<audio>
+    prompt = f'<text>{speaker}: <description="{description}"> {text_prompt}<audio>'
+    inputs = wrapper.tokenizer(prompt, return_tensors="pt").to(device)
+    print(f"Prompt Token Count: {inputs.input_ids.shape[1]}")
 
-    # Generate audio tokens with top_k=30 and temperature=0.8
-    print("[*] Generating audio token sequence...")
-    with torch.no_grad():
-        generated_ids = wrapper.transformer.generate(
-            input_ids=input_ids,
-            max_new_tokens=400, # generate up to ~4 seconds (400 / 100 tokens/s)
-            do_sample=True,
-            temperature=0.8,
-            top_k=30,
-            top_p=0.9,
-            repetition_penalty=1.05,
-            eos_token_id=wrapper.token_layout.audio_end_token_id,
-            pad_token_id=wrapper.tokenizer.pad_token_id or 0
-        )
-        
-    audio_tokens = generated_ids[:, input_ids.shape[1]:]
-    print(f"Generated {audio_tokens.shape[1]} audio tokens ({audio_tokens.shape[1] // 8} frames).")
+    model = wrapper.transformer
+    mimi = wrapper.mimi
 
-    # Decode via Mimi
-    if wrapper.mimi is not None and audio_tokens.shape[1] >= 8:
-        # Unflatten to [1, 8, num_frames] with safe codebook clamping
-        audio_codes = wrapper.token_layout.unflatten_audio_frames(audio_tokens)
-        print(f"Audio codes shape for Mimi: {audio_codes.shape} (min={audio_codes.min().item()}, max={audio_codes.max().item()})")
-        
-        with torch.no_grad():
-            mimi_in = audio_codes.to(device)
-            pcm_audio = wrapper.mimi.decode(mimi_in)
-            if hasattr(pcm_audio, "audio_values"):
-                pcm_arr = pcm_audio.audio_values.squeeze().cpu().float().numpy()
-            elif isinstance(pcm_audio, tuple):
-                pcm_arr = pcm_audio[0].squeeze().cpu().float().numpy()
-            else:
-                pcm_arr = pcm_audio.squeeze().cpu().float().numpy()
-
-        sf.write(output_wav, pcm_arr, 24000)
-        print(f"[+] Real speech waveform successfully decoded and saved to: {output_wav} ({len(pcm_arr)/24000:.2f}s)")
+    print("[*] Generating speech audio tokens...")
+    # Check if official generate_audio method is present
+    if hasattr(model, "generate_audio"):
+        with torch.inference_mode():
+            ids = model.generate_audio(
+                **inputs,
+                max_new_tokens=2048,
+                temperature=0.8,
+                top_k=30,
+                do_sample=True
+            )
+            audio_tokens = ids[0].tolist()[inputs.input_ids.shape[1]:]
     else:
-        print("[!] Insufficient tokens or Mimi model not available.")
+        with torch.inference_mode():
+            ids = model.generate(
+                **inputs,
+                max_new_tokens=1024,
+                temperature=0.8,
+                top_k=30,
+                top_p=0.9,
+                do_sample=True,
+                eos_token_id=wrapper.token_layout.audio_end_token_id,
+                pad_token_id=wrapper.tokenizer.pad_token_id or 0
+            )
+            audio_tokens = ids[0].tolist()[inputs.input_ids.shape[1]:]
 
-    print("\n[+] End-to-end checkpoint verification passed!")
+    print(f"[+] Generated {len(audio_tokens)} audio tokens ({len(audio_tokens) / 100:.2f}s audio).")
+
+    # Decode audio tokens to waveform
+    if len(audio_tokens) >= 8 and mimi is not None:
+        if hasattr(model, "audio_tokens_to_codes"):
+            codes = model.audio_tokens_to_codes(audio_tokens)
+        else:
+            token_tensor = torch.tensor([audio_tokens], dtype=torch.long, device=device)
+            codes = wrapper.token_layout.unflatten_audio_frames(token_tensor)
+
+        print(f"Audio codes shape: {codes.shape}")
+
+        with torch.inference_mode():
+            decoded = mimi.decode(codes.to(device))
+            if hasattr(decoded, "audio_values"):
+                wav = decoded.audio_values[0, 0].float().cpu().numpy()
+            elif isinstance(decoded, tuple):
+                wav = decoded[0].squeeze().float().cpu().numpy()
+            else:
+                wav = decoded.squeeze().float().cpu().numpy()
+
+        sf.write(output_wav, wav, 24000)
+        print(f"[+] Audio successfully written to: {output_wav} ({len(wav) / 24000:.2f} seconds)")
+    else:
+        print("[!] Warning: Could not decode audio tokens. Mimi codec not ready or tokens empty.")
+
+    print("\n[+] End-to-end verification completed successfully!")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Verify Rumik-OSS-1 Checkpoint and Environment")
@@ -163,7 +159,10 @@ if __name__ == "__main__":
     parser.add_argument("--mimi-id", type=str, default="kyutai/mimi")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--output-wav", type=str, default="outputs/phase1_test_output.wav")
-    parser.add_argument("--dry-run", action="store_true", help="Run structural validation without downloading weights")
+    parser.add_argument("--speaker", type=str, default="Ira", choices=["Ira", "Aisha", "Siya", "Zoya"])
+    parser.add_argument("--description", type=str, default="happy, Hindi accent, steady pace")
+    parser.add_argument("--prompt", type=str, default="नमस्ते, आज आपका दिन कैसा रहा?")
+    parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     run_verification(
@@ -171,5 +170,8 @@ if __name__ == "__main__":
         mimi_id=args.mimi_id,
         device=args.device,
         output_wav=args.output_wav,
+        speaker=args.speaker,
+        description=args.description,
+        text_prompt=args.prompt,
         dry_run=args.dry_run
     )

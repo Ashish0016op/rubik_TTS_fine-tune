@@ -63,14 +63,15 @@ class StreamingEngine:
         self,
         logits: torch.Tensor,
         current_cb_idx: int,
-        temperature: float = 0.7,
-        top_p: float = 0.95,
-        top_k: int = 50,
+        temperature: float = 0.8,
+        top_p: float = 0.9,
+        top_k: int = 30,
         repetition_penalty: float = 1.05,
         generated_tokens: Optional[torch.Tensor] = None
     ) -> int:
-        """Constrains next-token sampling to the valid vocabulary range for the expected codebook."""
-        # Logits: [1, vocab_size]
+        """Constrains next-token sampling to the valid vocabulary indices for quantizer q:
+        tid = first_unit_id + code * 8 + current_cb_idx (where code in [0..2047]).
+        """
         logits = logits.squeeze(0).clone()
 
         # Apply repetition penalty if provided
@@ -81,17 +82,16 @@ class StreamingEngine:
                 else:
                     logits[token_id] *= repetition_penalty
 
-        # Mask out anything outside the target codebook range
-        cb_offset_start = self.token_layout.audio_vocab_offset + (current_cb_idx * self.token_layout.codebook_size)
-        cb_offset_end = cb_offset_start + self.token_layout.codebook_size
+        # Compute valid token IDs for quantizer q: 261008 + code * 8 + q
+        codes = torch.arange(self.token_layout.codebook_size, device=logits.device, dtype=torch.long)
+        valid_token_ids = self.token_layout.audio_vocab_offset + (codes * self.token_layout.num_codebooks) + current_cb_idx
+        
+        # Valid bounds
+        valid_token_ids = valid_token_ids[valid_token_ids < logits.shape[0]]
 
         mask = torch.full_like(logits, float("-inf"))
-        # Safe bounds check
-        end_idx = min(cb_offset_end, logits.shape[0])
-        start_idx = min(cb_offset_start, logits.shape[0])
-        if start_idx < end_idx:
-            mask[start_idx:end_idx] = logits[start_idx:end_idx]
-            logits = mask
+        mask[valid_token_ids] = logits[valid_token_ids]
+        logits = mask
 
         # Apply temperature
         if temperature > 0:

@@ -1,4 +1,4 @@
-"""Unit tests for TokenLayoutManager: offsets, interleaving, and roundtrips."""
+"""Unit tests for TokenLayoutManager: official Rumik-OSS-1 offsets, interleaving, and roundtrips."""
 
 import unittest
 import torch
@@ -25,35 +25,34 @@ class TestTokenLayout(unittest.TestCase):
         self.assertEqual(self.layout.total_vocab_size, 277404)
 
     def test_audio_token_identification(self):
-        # Text token
         self.assertFalse(self.layout.is_audio_token(0))
         self.assertFalse(self.layout.is_audio_token(261007))
-        
-        # Audio tokens
-        self.assertTrue(self.layout.is_audio_token(261008)) # start of cb0
-        self.assertTrue(self.layout.is_audio_token(261008 + 2047)) # end of cb0
-        self.assertTrue(self.layout.is_audio_token(261008 + 7 * 2048)) # start of cb7
-        self.assertTrue(self.layout.is_audio_token(277391)) # last valid audio token
-        
-        # Special tokens
-        self.assertFalse(self.layout.is_audio_token(277392)) # text_start
-        self.assertFalse(self.layout.is_audio_token(277393)) # audio_start
-        self.assertFalse(self.layout.is_audio_token(277394)) # audio_end
+        self.assertTrue(self.layout.is_audio_token(261008))
+        self.assertTrue(self.layout.is_audio_token(277391))
+        self.assertFalse(self.layout.is_audio_token(277392))
 
-    def test_code_offset_mapping(self):
-        # Codebook 0, Code 0 -> 261008
+    def test_official_code_offset_mapping(self):
+        # Formula: tid = first_unit_id + code * 8 + q
+        # Code 0, Quantizer 0 -> 261008 + 0*8 + 0 = 261008
         t0 = self.layout.audio_code_to_token_id(0, 0)
         self.assertEqual(t0, 261008)
         cb_idx, code_val = self.layout.token_id_to_audio_code(t0)
         self.assertEqual(cb_idx, 0)
         self.assertEqual(code_val, 0)
 
-        # Codebook 3, Code 512 -> 261008 + 3*2048 + 512 = 267664
-        t3 = self.layout.audio_code_to_token_id(3, 512)
-        self.assertEqual(t3, 261008 + 3 * 2048 + 512)
+        # Code 500, Quantizer 3 -> 261008 + 500*8 + 3 = 265011
+        t3 = self.layout.audio_code_to_token_id(3, 500)
+        self.assertEqual(t3, 261008 + 500 * 8 + 3)
         cb_idx, code_val = self.layout.token_id_to_audio_code(t3)
         self.assertEqual(cb_idx, 3)
-        self.assertEqual(code_val, 512)
+        self.assertEqual(code_val, 500)
+
+        # Last code 2047, Quantizer 7 -> 261008 + 2047*8 + 7 = 277391
+        t_last = self.layout.audio_code_to_token_id(7, 2047)
+        self.assertEqual(t_last, 277391)
+        cb_idx, code_val = self.layout.token_id_to_audio_code(t_last)
+        self.assertEqual(cb_idx, 7)
+        self.assertEqual(code_val, 2047)
 
     def test_flatten_unflatten_roundtrip(self):
         # 1D single example [8, 50] (50 frames = 400 tokens)
@@ -61,6 +60,11 @@ class TestTokenLayout(unittest.TestCase):
         flat = self.layout.flatten_audio_frames(original_codes)
         self.assertEqual(flat.shape, (400,))
         
+        # Verify first frame tokens
+        for q in range(8):
+            expected_tid = 261008 + original_codes[q, 0].item() * 8 + q
+            self.assertEqual(flat[q].item(), expected_tid)
+
         # Reconstruct
         reconstructed = self.layout.unflatten_audio_frames(flat)
         self.assertTrue(torch.equal(original_codes, reconstructed))

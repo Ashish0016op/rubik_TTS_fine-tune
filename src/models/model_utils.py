@@ -50,23 +50,23 @@ class TokenLayoutManager:
         return self.audio_vocab_offset <= token_id <= self.last_audio_token_id
 
     def audio_code_to_token_id(self, codebook_idx: int, code_value: int) -> int:
+        """Formula: tid = first_unit_id + code * num_codebooks + codebook_idx"""
         assert 0 <= codebook_idx < self.num_codebooks, f"Invalid codebook index: {codebook_idx}"
         code_value = max(0, min(self.codebook_size - 1, code_value))
-        return self.audio_vocab_offset + (codebook_idx * self.codebook_size) + code_value
+        return self.audio_vocab_offset + (code_value * self.num_codebooks) + codebook_idx
 
     def token_id_to_audio_code(self, token_id: int) -> Tuple[int, int]:
+        """Formula: code, q = divmod(tid - first_unit_id, num_codebooks)"""
         if not self.is_audio_token(token_id):
             return 0, 0
-        offset_val = token_id - self.audio_vocab_offset
-        codebook_idx = offset_val // self.codebook_size
-        code_value = offset_val % self.codebook_size
-        return int(codebook_idx), int(code_value)
+        code_val, cb_idx = divmod(token_id - self.audio_vocab_offset, self.num_codebooks)
+        return int(cb_idx), int(code_val)
 
     def flatten_audio_frames(self, audio_codes: torch.Tensor) -> torch.Tensor:
         """Converts [batch, num_codebooks, num_frames] or [num_codebooks, num_frames] to interleaved token IDs.
         
-        Order per frame: cb0, cb1, cb2, ..., cb7.
-        Returns: tensor of shape [..., num_frames * num_codebooks].
+        Official Rumik-OSS-1 Interleaving:
+        Each frame has 8 tokens (q=0..7). Token ID = first_unit_id + code * 8 + q.
         """
         is_batched = audio_codes.dim() == 3
         if not is_batched:
@@ -78,24 +78,26 @@ class TokenLayoutManager:
         # Clamp input codes safely to [0, codebook_size - 1]
         audio_codes = torch.clamp(audio_codes, 0, self.codebook_size - 1).long()
 
-        # Transpose to [b, t, k] for interleaved flattening
+        # Transpose to [b, t, k] for frame-major ordering
         transposed = audio_codes.permute(0, 2, 1).contiguous()
         
-        # Create codebook offsets [0, 2048, 4096, ...] + 261008
-        offsets = torch.arange(k, device=audio_codes.device, dtype=torch.long) * self.codebook_size + self.audio_vocab_offset
-        offsets = offsets.view(1, 1, k)
+        # Quantizer indices [0, 1, 2, 3, 4, 5, 6, 7]
+        q_indices = torch.arange(k, device=audio_codes.device, dtype=torch.long).view(1, 1, k)
         
-        flat_tokens = (transposed + offsets).view(b, t * k)
+        # Token ID = 261008 + code * 8 + q
+        flat_tokens = (transposed * self.num_codebooks + q_indices + self.audio_vocab_offset).view(b, t * k)
         return flat_tokens if is_batched else flat_tokens.squeeze(0)
 
     def unflatten_audio_frames(self, flat_tokens: torch.Tensor) -> torch.Tensor:
-        """Converts interleaved flat audio token IDs back to [..., num_codebooks, num_frames] with safe clamping."""
+        """Converts interleaved flat audio token IDs back to [..., num_codebooks, num_frames].
+        
+        Matches official RumikOSSForCausalLM.audio_tokens_to_codes implementation.
+        """
         is_batched = flat_tokens.dim() == 2
         if not is_batched:
             flat_tokens = flat_tokens.unsqueeze(0)
             
         b, seq_len = flat_tokens.shape
-        # Truncate to multiple of 8 if needed
         valid_len = (seq_len // self.num_codebooks) * self.num_codebooks
         if valid_len < seq_len:
             flat_tokens = flat_tokens[:, :valid_len]
@@ -105,11 +107,10 @@ class TokenLayoutManager:
             return torch.zeros((b, self.num_codebooks, 0), dtype=torch.long, device=flat_tokens.device)
 
         tokens_3d = flat_tokens.view(b, num_frames, self.num_codebooks)
-        offsets = torch.arange(self.num_codebooks, device=flat_tokens.device, dtype=torch.long) * self.codebook_size + self.audio_vocab_offset
-        offsets = offsets.view(1, 1, self.num_codebooks)
+        q_indices = torch.arange(self.num_codebooks, device=flat_tokens.device, dtype=torch.long).view(1, 1, self.num_codebooks)
         
-        raw_codes = tokens_3d - offsets
-        # Strictly clamp code values to [0, codebook_size - 1] so Mimi never throws CUDA assertion error
+        # code = (tid - 261008 - q) // 8
+        raw_codes = (tokens_3d - self.audio_vocab_offset - q_indices) // self.num_codebooks
         raw_codes = torch.clamp(raw_codes, 0, self.codebook_size - 1).long()
         
         # Permute to [b, num_codebooks, num_frames]
@@ -182,13 +183,19 @@ class RumikModelWrapper(nn.Module):
 
         mimi_model = None
         if load_mimi:
-            print(f"[*] Loading frozen Mimi codec ({mimi_model_id})...")
+            print(f"[*] Loading frozen Mimi codec from {model_name_or_path} (subfolder='codec')...")
             try:
                 if MimiModel is not None:
-                    mimi_model = MimiModel.from_pretrained(mimi_model_id).to(device)
+                    try:
+                        mimi_model = MimiModel.from_pretrained(model_name_or_path, subfolder="codec").to(device)
+                    except Exception:
+                        mimi_model = MimiModel.from_pretrained(mimi_model_id).to(device)
                 else:
                     from transformers import AutoModel
-                    mimi_model = AutoModel.from_pretrained(mimi_model_id, trust_remote_code=True).to(device)
+                    try:
+                        mimi_model = AutoModel.from_pretrained(model_name_or_path, subfolder="codec", trust_remote_code=True).to(device)
+                    except Exception:
+                        mimi_model = AutoModel.from_pretrained(mimi_model_id, trust_remote_code=True).to(device)
                 mimi_model.eval()
                 for p in mimi_model.parameters():
                     p.requires_grad = False
