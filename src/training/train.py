@@ -167,13 +167,18 @@ class RumikFineTuner:
             total_loss += metrics["total_loss"]
             steps += 1
 
-        avg_loss = total_loss / max(1, steps)
-        return {"val_loss": avg_loss}
+    def save_checkpoint(self, output_dir: str, clean_existing: bool = True):
+        """Saves fine-tuned LoRA weights and optional speaker encoder, removing old checkpoint files to retain only one."""
+        import shutil
+        if clean_existing and os.path.exists(output_dir):
+            try:
+                # Remove old checkpoint directory contents to keep only the single latest/best checkpoint
+                shutil.rmtree(output_dir)
+            except Exception as e:
+                print(f"[!] Note: Could not completely clear existing {output_dir}: {e}")
 
-    def save_checkpoint(self, output_dir: str):
-        """Saves fine-tuned LoRA weights and optional speaker encoder."""
         os.makedirs(output_dir, exist_ok=True)
-        print(f"[*] Saving LoRA checkpoint to {output_dir}...")
+        print(f"[*] Saving single checkpoint to {output_dir}...")
         
         # Save LoRA adapter weights
         if hasattr(self.wrapper.transformer, "save_pretrained"):
@@ -189,4 +194,4 @@ class RumikFineTuner:
             spk_path = os.path.join(output_dir, "speaker_module.pt")
             torch.save(self.speaker_module.state_dict(), spk_path)
 
-        print(f"[+] Successfully saved checkpoint artifacts to {output_dir}")
+        print(f"[+] Successfully saved single checkpoint to {output_dir}")

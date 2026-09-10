@@ -143,13 +143,20 @@ def run_finetuning(
         )
 
         print("\n[*] Running training epochs...")
+        best_val_loss = float("inf")
         for epoch in range(1, epochs + 1):
             train_metrics = tuner.train_epoch(train_loader, epoch=epoch)
             val_metrics = tuner.evaluate(val_loader)
-            print(f"Epoch {epoch}/{epochs} | Train Loss: {train_metrics['avg_train_loss']:.4f} | Val Loss: {val_metrics['val_loss']:.4f}")
+            current_val_loss = val_metrics['val_loss']
+            print(f"Epoch {epoch}/{epochs} | Train Loss: {train_metrics['avg_train_loss']:.4f} | Val Loss: {current_val_loss:.4f}")
+            
+            # Save single best checkpoint (removes old checkpoint before writing new one)
+            if current_val_loss < best_val_loss:
+                best_val_loss = current_val_loss
+                print(f"[*] New best validation loss: {best_val_loss:.4f}. Updating single checkpoint...")
+                tuner.save_checkpoint(output_dir, clean_existing=True)
 
-        tuner.save_checkpoint(output_dir)
-        print("\n[+] Phase 3 fine-tuning successfully verified!")
+        print("\n[+] Phase 3 fine-tuning successfully verified! Single checkpoint preserved.")
         return
 
     # Real GPU Fine-Tuning
@@ -183,13 +190,20 @@ def run_finetuning(
         device=device
     )
 
+    best_val_loss = float("inf")
     for epoch in range(1, epochs + 1):
         train_metrics = tuner.train_epoch(train_loader, epoch=epoch)
         val_metrics = tuner.evaluate(val_loader)
-        print(f"Epoch {epoch}/{epochs} | Train Loss: {train_metrics['avg_train_loss']:.4f} | Val Loss: {val_metrics['val_loss']:.4f}")
+        current_val_loss = val_metrics['val_loss']
+        print(f"Epoch {epoch}/{epochs} | Train Loss: {train_metrics['avg_train_loss']:.4f} | Val Loss: {current_val_loss:.4f}")
+        
+        # Keep only one best checkpoint on disk
+        if current_val_loss < best_val_loss:
+            best_val_loss = current_val_loss
+            print(f"[*] New best validation loss: {best_val_loss:.4f}. Overwriting with new single checkpoint...")
+            tuner.save_checkpoint(output_dir, clean_existing=True)
 
-    tuner.save_checkpoint(output_dir)
-    print("\n[+] Phase 3 fine-tuning complete!")
+    print(f"\n[+] Fine-tuning complete! Single best checkpoint saved at: {output_dir}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="LoRA Fine-Tuning for Rumik TTS")
