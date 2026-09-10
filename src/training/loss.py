@@ -10,15 +10,16 @@ class RumikTTSLoss(nn.Module):
 
     def __init__(
         self,
-        text_vocab_size: int = 256000,
+        audio_vocab_offset: int = 261008,
         num_codebooks: int = 8,
         codebook_size: int = 2048,
         cb0_weight: float = 1.5,
         stop_loss_weight: float = 0.5,
-        label_smoothing: float = 0.0
+        label_smoothing: float = 0.0,
+        text_vocab_size: Optional[int] = None
     ):
         super().__init__()
-        self.text_vocab_size = text_vocab_size
+        self.audio_vocab_offset = audio_vocab_offset if text_vocab_size is None else 261008
         self.num_codebooks = num_codebooks
         self.codebook_size = codebook_size
         self.cb0_weight = cb0_weight

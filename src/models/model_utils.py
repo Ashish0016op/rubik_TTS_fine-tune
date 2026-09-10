@@ -35,16 +35,21 @@ class TokenLayoutManager:
         total_vocab_size: int = 277404,
         text_start_token_id: int = 277392,
         audio_start_token_id: int = 277393,
-        audio_end_token_id: int = 277394
+        audio_end_token_id: int = 277394,
+        text_vocab_size: Optional[int] = None
     ):
-        self.audio_vocab_offset = audio_vocab_offset
+        self.audio_vocab_offset = audio_vocab_offset if text_vocab_size is None else 261008
         self.num_codebooks = num_codebooks
         self.codebook_size = codebook_size
         self.total_vocab_size = total_vocab_size
-        self.last_audio_token_id = audio_vocab_offset + (num_codebooks * codebook_size) - 1 # 277391
+        self.last_audio_token_id = self.audio_vocab_offset + (num_codebooks * codebook_size) - 1 # 277391
         self.text_start_token_id = text_start_token_id
         self.audio_start_token_id = audio_start_token_id
         self.audio_end_token_id = audio_end_token_id
+
+    @property
+    def text_vocab_size(self) -> int:
+        return self.audio_vocab_offset
 
     def is_audio_token(self, token_id: int) -> bool:
         return self.audio_vocab_offset <= token_id <= self.last_audio_token_id

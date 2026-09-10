@@ -100,7 +100,7 @@ class RumikTTSDataset(Dataset):
     ) -> Tuple["RumikTTSDataset", "RumikTTSDataset"]:
         """Loads audio files and transcript CSV, encodes through Mimi, and creates train/val splits."""
         preprocessor = AudioPreprocessor(target_sample_rate=24000)
-        token_layout = TokenLayoutManager(text_vocab_size=len(tokenizer))
+        token_layout = TokenLayoutManager()
         
         processed_items = []
         with open(transcript_csv, "r", encoding="utf-8") as f:
