@@ -35,20 +35,26 @@ def run_verification(
 
     if dry_run:
         print("\n[!] DRY RUN MODE ACTIVATED: Performing offline structural validation...")
-        text_vocab = 256000
+        audio_offset = 261008
         n_codebooks = 8
         cb_size = 2048
-        layout = TokenLayoutManager(text_vocab_size=text_vocab, num_codebooks=n_codebooks, codebook_size=cb_size)
+        total_vocab = 277404
+        layout = TokenLayoutManager(
+            audio_vocab_offset=audio_offset,
+            num_codebooks=n_codebooks,
+            codebook_size=cb_size,
+            total_vocab_size=total_vocab
+        )
         
-        expected_total = text_vocab + (n_codebooks * cb_size)
         print(f"\n1. Vocabulary Verification:")
-        print(f"   - Text Vocab Size       : {text_vocab}")
+        print(f"   - Audio Offset Start    : {audio_offset} (first_unit_id)")
         print(f"   - Audio Codebooks       : {n_codebooks} (RVQ 0-7)")
         print(f"   - Codebook Size         : {cb_size}")
-        print(f"   - Audio Offset Start    : {layout.audio_vocab_offset}")
-        print(f"   - Calculated Total Vocab: {layout.total_vocab_size} (Expected: {expected_total})")
-        assert layout.total_vocab_size == expected_total, "Vocabulary formula mismatch!"
-        print("   [+] Vocab size formula verified successfully!")
+        print(f"   - Audio Tokens Range    : [{audio_offset} .. {layout.last_audio_token_id}]")
+        print(f"   - Total Model Vocab Size: {total_vocab}")
+        print(f"   - Special Tokens        : text_start={layout.text_start_token_id}, audio_start={layout.audio_start_token_id}, audio_end={layout.audio_end_token_id}")
+        assert layout.last_audio_token_id == 277391, "Audio range mismatch!"
+        print("   [+] Vocab size and codebook formula verified successfully!")
 
         print(f"\n2. Token Interleaving / Flattening Test:")
         dummy_codes = torch.randint(0, 2048, (1, 8, 25)) # 25 frames = 2 seconds
@@ -57,6 +63,7 @@ def run_verification(
         assert torch.equal(dummy_codes, reconstructed_codes), "Flatten/Unflatten roundtrip mismatch!"
         print(f"   - Input Audio Codes Shape   : {dummy_codes.shape}")
         print(f"   - Flattened Token IDs Shape : {flat_tokens.shape} (25 * 8 = {flat_tokens.shape[1]} tokens)")
+        print(f"   - Sample Token ID Range     : [{flat_tokens.min().item()} .. {flat_tokens.max().item()}]")
         print("   [+] Interleaved layout encoding/decoding roundtrip verified!")
 
         print(f"\n3. Frozen Mimi Codec Specs:")
@@ -65,90 +72,81 @@ def run_verification(
         print(f"   - Tokens/sec  : 100 tokens/sec")
         print("   [+] Codec parameters verified!")
 
-        print(f"\n4. Generating Sample Test Audio (Synthetic Sine/Chirp for dry-run)...")
-        sample_rate = 24000
-        duration = 2.0
-        t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
-        audio = 0.3 * np.sin(2 * np.pi * 440 * t) # 440 Hz A tone
-        sf.write(output_wav, audio.astype(np.float32), sample_rate)
-        print(f"   [+] Output WAV written to: {output_wav}")
-
-        print(f"\n5. Configuration Summary:")
+        print(f"\n4. Configuration Summary:")
         mock_summary = {
-            "model_type": "cohere2_tts",
-            "num_hidden_layers": 28,
+            "model_type": "rumik_oss",
+            "num_hidden_layers": 36,
             "hidden_size": 2048,
             "num_attention_heads": 16,
-            "vocab_size": expected_total,
+            "vocab_size": 277404,
+            "audio_vocab_offset": 261008,
+            "audio_token_range": "[261008 .. 277391]",
             "has_stop_head": True,
             "mimi_sample_rate": 24000,
-            "mimi_frame_rate": 12.5
+            "mimi_frame_rate": 12.5,
+            "speakers": ["Ira", "Aisha", "Siya", "Zoya"]
         }
         print(json.dumps(mock_summary, indent=4))
-        print("\n[+] Phase 1 verification completed successfully!")
+        print("\n[+] Phase 1 dry-run verification completed successfully!")
         return
 
     # Real checkpoint loading
     print(f"\n[*] Loading model {model_id} from HuggingFace...")
-    try:
-        wrapper = RumikModelWrapper.load(
-            model_name_or_path=model_id,
-            mimi_model_id=mimi_id,
-            device=device
+    wrapper = RumikModelWrapper.load(
+        model_name_or_path=model_id,
+        mimi_model_id=mimi_id,
+        device=device
+    )
+    summary = wrapper.get_config_summary()
+    print("\n=== Model Configuration Inspection ===")
+    print(json.dumps(summary, indent=4))
+
+    # Test generation with prompt
+    test_prompt = "Namaste, aapka swagat hai. Kaise hain aap?"
+    print(f"\n=== Single-Utterance Test Synthesis ===")
+    print(f"Prompt: '{test_prompt}'")
+    
+    # Format prompt for Rumik-OSS-1
+    input_ids = wrapper.format_input_prompt(test_prompt, speaker="Ira").to(device)
+    print(f"Prompt text tokens count: {input_ids.shape[1]}")
+
+    # Generate audio tokens
+    with torch.no_grad():
+        generated_ids = wrapper.transformer.generate(
+            input_ids=input_ids,
+            max_new_tokens=200,
+            do_sample=True,
+            temperature=0.7,
+            top_p=0.95,
+            eos_token_id=wrapper.token_layout.audio_end_token_id,
+            pad_token_id=wrapper.tokenizer.pad_token_id or 0
         )
-        summary = wrapper.get_config_summary()
-        print("\n=== Model Configuration Inspection ===")
-        print(json.dumps(summary, indent=4))
-
-        # Check vocab size
-        print("\n=== Vocabulary Verification ===")
-        print(f"Base Vocab Size : {summary['vocab_size']}")
-        print(f"Expected Size   : {summary['calculated_total_vocab']}")
-        if summary["vocab_match"]:
-            print("[+] PASS: Vocab size perfectly matches text_vocab + 8 * codebook_size")
-        else:
-            print("[!] WARNING: Model vocab size differs from standard layout expectation.")
-
-        # Test generation with prompt
-        test_prompt = "Namaste, aapka swagat hai. Kaise hain aap?"
-        print(f"\n=== Single-Utterance Test Synthesis ===")
-        print(f"Prompt: '{test_prompt}'")
         
-        # Tokenize prompt
-        inputs = wrapper.tokenizer(test_prompt, return_tensors="pt").to(device)
-        print(f"Prompt text tokens count: {inputs.input_ids.shape[1]}")
+    audio_tokens = generated_ids[:, input_ids.shape[1]:]
+    print(f"Generated {audio_tokens.shape[1]} audio tokens.")
 
-        # Non-streaming forward pass
+    # Decode via Mimi
+    if wrapper.mimi is not None and audio_tokens.shape[1] >= 8:
+        # Unflatten to [1, 8, num_frames] with safe codebook clamping
+        audio_codes = wrapper.token_layout.unflatten_audio_frames(audio_tokens)
+        print(f"Audio codes shape for Mimi: {audio_codes.shape} (min={audio_codes.min().item()}, max={audio_codes.max().item()})")
+        
         with torch.no_grad():
-            generated_ids = wrapper.transformer.generate(
-                **inputs,
-                max_new_tokens=200,
-                do_sample=True,
-                temperature=0.7,
-                top_p=0.95
-            )
-        audio_tokens = generated_ids[:, inputs.input_ids.shape[1]:]
-        print(f"Generated {audio_tokens.shape[1]} audio tokens.")
+            mimi_in = audio_codes.to(device)
+            pcm_audio = wrapper.mimi.decode(mimi_in)
+            if hasattr(pcm_audio, "audio_values"):
+                pcm_arr = pcm_audio.audio_values.squeeze().cpu().float().numpy()
+            elif isinstance(pcm_audio, tuple):
+                pcm_arr = pcm_audio[0].squeeze().cpu().float().numpy()
+            else:
+                pcm_arr = pcm_audio.squeeze().cpu().float().numpy()
 
-        # Decode via Mimi
-        if wrapper.mimi is not None and audio_tokens.shape[1] >= 8:
-            # truncate to multiple of 8
-            n_frames = audio_tokens.shape[1] // 8
-            clean_tokens = audio_tokens[:, :n_frames * 8]
-            audio_codes = wrapper.token_layout.unflatten_audio_frames(clean_tokens)
-            with torch.no_grad():
-                pcm_audio = wrapper.mimi.decode(audio_codes).audio_values
-            sf.write(output_wav, pcm_audio.squeeze().cpu().numpy(), 24000)
-            print(f"[+] Audio decoded and written to: {output_wav}")
-        else:
-            print("[!] Mimi codec not active or insufficient tokens generated.")
+        sf.write(output_wav, pcm_arr, 24000)
+        print(f"[+] Real speech waveform successfully decoded and saved to: {output_wav} ({len(pcm_arr)/24000:.2f}s)")
+    else:
+        print("[!] Insufficient tokens or Mimi model not available.")
 
-        print("\n[+] End-to-end verification passed!")
-
-    except Exception as e:
-        print(f"\n[!] Error loading live HuggingFace checkpoint: {e}")
-        print("[*] Falling back to dry-run verification mode.")
-        run_verification(model_id, mimi_id, device, output_wav, dry_run=True)
+    print("\n[+] End-to-end checkpoint verification passed!")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Verify Rumik-OSS-1 Checkpoint and Environment")

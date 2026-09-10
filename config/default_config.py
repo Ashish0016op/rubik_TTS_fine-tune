@@ -17,12 +17,15 @@ class AudioConfig:
 class ModelConfig:
     model_name_or_path: str = "rumik-ai/rumik-oss-1"
     mimi_model_id: str = "kyutai/mimi"
-    text_vocab_size: int = 256000 # default Cohere2 vocab
-    audio_vocab_offset: int = 256000
-    total_vocab_size: int = 256000 + (8 * 2048) # text_vocab + 8 * 2048 = 272384
+    audio_vocab_offset: int = 261008 # exact first_unit_id in rumik-oss-1
+    total_vocab_size: int = 277404   # exact total vocab_size in rumik-oss-1
+    text_start_token_id: int = 277392
+    audio_start_token_id: int = 277393
+    audio_end_token_id: int = 277394 # stop token
+    speakers: List[str] = field(default_factory=lambda: ["Ira", "Aisha", "Siya", "Zoya"])
     has_stop_head: bool = True
     stop_head_threshold: float = 0.5
-    device: str = "cuda" # or "cpu"
+    device: str = "cuda"
 
 @dataclass
 class LoRAConfig:
@@ -38,9 +41,9 @@ class LoRAConfig:
 class SpeakerEncoderConfig:
     enabled: bool = False
     embedding_dim: int = 256
-    hidden_dim: int = 512
+    hidden_dim: int = 2048
     num_layers: int = 3
-    inject_mode: str = "prefix" # "prefix" or "cross_attention"
+    inject_mode: str = "prefix"
 
 @dataclass
 class TrainingConfig:
@@ -56,16 +59,16 @@ class TrainingConfig:
     save_steps: int = 100
     logging_steps: int = 10
     fp16: bool = True
-    replay_ratio: float = 0.15 # General data mix to prevent catastrophic forgetting
+    replay_ratio: float = 0.15
 
 @dataclass
 class StreamingConfig:
-    chunk_frames: int = 1 # 1 Mimi frame = 8 tokens = 80ms of audio
+    chunk_frames: int = 1
     temperature: float = 0.7
     top_p: float = 0.95
     top_k: int = 50
     repetition_penalty: float = 1.05
-    max_frames: int = 300 # ~24 seconds of audio (300 * 8 = 2400 tokens)
+    max_frames: int = 300
     stop_threshold: float = 0.5
 
 @dataclass

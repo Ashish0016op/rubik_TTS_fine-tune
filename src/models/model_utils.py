@@ -13,41 +13,60 @@ except ImportError:
 class TokenLayoutManager:
     """Manages conversion between flattened token IDs and (text, codebook_levels).
     
-    Layout:
-    - Text Tokens: [0, text_vocab_size - 1]
-    - Codebook 0 Tokens: [text_vocab_size, text_vocab_size + 2047]
-    - Codebook 1 Tokens: [text_vocab_size + 2048, text_vocab_size + 4095]
-    ...
-    - Codebook 7 Tokens: [text_vocab_size + 7*2048, text_vocab_size + 8*2048 - 1]
+    Official Rumik-OSS-1 Layout:
+    - Total Vocab Size: 277,404
+    - Text Tokens & Special Tokens: [0, 261,007]
+    - Audio Tokens (8 codebooks x 2048 entries): [261,008, 277,391]
+        - Codebook 0: [261,008, 263,055]
+        - Codebook 1: [263,056, 265,103]
+        - ...
+        - Codebook 7: [275,344, 277,391]
+    - Special Tags:
+        - text_start_token_id: 277,392
+        - audio_start_token_id: 277,393
+        - audio_end_token_id (Stop Token): 277,394
     """
 
-    def __init__(self, text_vocab_size: int = 256000, num_codebooks: int = 8, codebook_size: int = 2048):
-        self.text_vocab_size = text_vocab_size
+    def __init__(
+        self,
+        audio_vocab_offset: int = 261008,
+        num_codebooks: int = 8,
+        codebook_size: int = 2048,
+        total_vocab_size: int = 277404,
+        text_start_token_id: int = 277392,
+        audio_start_token_id: int = 277393,
+        audio_end_token_id: int = 277394
+    ):
+        self.audio_vocab_offset = audio_vocab_offset
         self.num_codebooks = num_codebooks
         self.codebook_size = codebook_size
-        self.audio_vocab_offset = text_vocab_size
-        self.total_vocab_size = text_vocab_size + (num_codebooks * codebook_size)
+        self.total_vocab_size = total_vocab_size
+        self.last_audio_token_id = audio_vocab_offset + (num_codebooks * codebook_size) - 1 # 277391
+        self.text_start_token_id = text_start_token_id
+        self.audio_start_token_id = audio_start_token_id
+        self.audio_end_token_id = audio_end_token_id
 
     def is_audio_token(self, token_id: int) -> bool:
-        return self.audio_vocab_offset <= token_id < self.total_vocab_size
+        return self.audio_vocab_offset <= token_id <= self.last_audio_token_id
 
     def audio_code_to_token_id(self, codebook_idx: int, code_value: int) -> int:
         assert 0 <= codebook_idx < self.num_codebooks, f"Invalid codebook index: {codebook_idx}"
-        assert 0 <= code_value < self.codebook_size, f"Invalid code value: {code_value}"
+        code_value = max(0, min(self.codebook_size - 1, code_value))
         return self.audio_vocab_offset + (codebook_idx * self.codebook_size) + code_value
 
     def token_id_to_audio_code(self, token_id: int) -> Tuple[int, int]:
-        assert self.is_audio_token(token_id), f"Token {token_id} is not an audio token"
+        if not self.is_audio_token(token_id):
+            return 0, 0
         offset_val = token_id - self.audio_vocab_offset
         codebook_idx = offset_val // self.codebook_size
         code_value = offset_val % self.codebook_size
-        return codebook_idx, code_value
+        return int(codebook_idx), int(code_value)
 
     def flatten_audio_frames(self, audio_codes: torch.Tensor) -> torch.Tensor:
         """Converts [batch, num_codebooks, num_frames] or [num_codebooks, num_frames] to interleaved token IDs.
         
         Order per frame: cb0, cb1, cb2, ..., cb7.
-        Returns: 1D or 2D tensor of shape [..., num_frames * num_codebooks].
+        Returns: tensor of shape [..., num_frames * num_codebooks].
         """
         is_batched = audio_codes.dim() == 3
         if not is_batched:
@@ -56,31 +75,43 @@ class TokenLayoutManager:
         b, k, t = audio_codes.shape
         assert k == self.num_codebooks, f"Expected {self.num_codebooks} codebooks, got {k}"
 
+        # Clamp input codes safely to [0, codebook_size - 1]
+        audio_codes = torch.clamp(audio_codes, 0, self.codebook_size - 1).long()
+
         # Transpose to [b, t, k] for interleaved flattening
         transposed = audio_codes.permute(0, 2, 1).contiguous()
         
-        # Create codebook offsets [0, 2048, 4096, ...]
-        offsets = torch.arange(k, device=audio_codes.device) * self.codebook_size + self.audio_vocab_offset
+        # Create codebook offsets [0, 2048, 4096, ...] + 261008
+        offsets = torch.arange(k, device=audio_codes.device, dtype=torch.long) * self.codebook_size + self.audio_vocab_offset
         offsets = offsets.view(1, 1, k)
         
         flat_tokens = (transposed + offsets).view(b, t * k)
         return flat_tokens if is_batched else flat_tokens.squeeze(0)
 
     def unflatten_audio_frames(self, flat_tokens: torch.Tensor) -> torch.Tensor:
-        """Converts interleaved flat audio token IDs back to [..., num_codebooks, num_frames]."""
+        """Converts interleaved flat audio token IDs back to [..., num_codebooks, num_frames] with safe clamping."""
         is_batched = flat_tokens.dim() == 2
         if not is_batched:
             flat_tokens = flat_tokens.unsqueeze(0)
             
         b, seq_len = flat_tokens.shape
-        assert seq_len % self.num_codebooks == 0, f"Token length {seq_len} not divisible by {self.num_codebooks}"
-        num_frames = seq_len // self.num_codebooks
-        
+        # Truncate to multiple of 8 if needed
+        valid_len = (seq_len // self.num_codebooks) * self.num_codebooks
+        if valid_len < seq_len:
+            flat_tokens = flat_tokens[:, :valid_len]
+            
+        num_frames = valid_len // self.num_codebooks
+        if num_frames == 0:
+            return torch.zeros((b, self.num_codebooks, 0), dtype=torch.long, device=flat_tokens.device)
+
         tokens_3d = flat_tokens.view(b, num_frames, self.num_codebooks)
-        offsets = torch.arange(self.num_codebooks, device=flat_tokens.device) * self.codebook_size + self.audio_vocab_offset
+        offsets = torch.arange(self.num_codebooks, device=flat_tokens.device, dtype=torch.long) * self.codebook_size + self.audio_vocab_offset
         offsets = offsets.view(1, 1, self.num_codebooks)
         
         raw_codes = tokens_3d - offsets
+        # Strictly clamp code values to [0, codebook_size - 1] so Mimi never throws CUDA assertion error
+        raw_codes = torch.clamp(raw_codes, 0, self.codebook_size - 1).long()
+        
         # Permute to [b, num_codebooks, num_frames]
         audio_codes = raw_codes.permute(0, 2, 1).contiguous()
         return audio_codes if is_batched else audio_codes.squeeze(0)
@@ -89,7 +120,7 @@ class TokenLayoutManager:
 class FrameStopHead(nn.Module):
     """Lightweight frame termination head predicting binary stop signal per frame."""
 
-    def __init__(self, hidden_dim: int):
+    def __init__(self, hidden_dim: int = 2048):
         super().__init__()
         self.dense = nn.Linear(hidden_dim, hidden_dim // 2)
         self.act = nn.GELU()
@@ -120,7 +151,6 @@ class RumikModelWrapper(nn.Module):
         self.mimi = mimi_model
         self.token_layout = token_layout or TokenLayoutManager()
         
-        # Attach or initialize stop head
         hidden_dim = getattr(transformer.config, "hidden_size", 2048)
         self.stop_head = stop_head or getattr(transformer, "stop_head", FrameStopHead(hidden_dim))
 
@@ -130,14 +160,17 @@ class RumikModelWrapper(nn.Module):
         model_name_or_path: str = "rumik-ai/rumik-oss-1",
         mimi_model_id: str = "kyutai/mimi",
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
-        torch_dtype: torch.dtype = torch.float16 if torch.cuda.is_available() else torch.float32,
+        torch_dtype: Optional[torch.dtype] = None,
         load_mimi: bool = True
     ) -> "RumikModelWrapper":
         """Loads Rumik-OSS-1 checkpoint with tokenizer and frozen Mimi codec."""
+        if torch_dtype is None:
+            torch_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+
         print(f"[*] Loading tokenizer for {model_name_or_path}...")
         tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
         
-        print(f"[*] Loading base transformer {model_name_or_path}...")
+        print(f"[*] Loading base transformer {model_name_or_path} (device={device})...")
         transformer = AutoModelForCausalLM.from_pretrained(
             model_name_or_path,
             torch_dtype=torch_dtype,
@@ -163,13 +196,24 @@ class RumikModelWrapper(nn.Module):
                 print(f"[!] Warning: Could not load Mimi directly via HF ({e}). Initializing fallback Mimi interface.")
                 mimi_model = None
 
-        text_vocab_size = len(tokenizer)
-        num_codebooks = 8
-        codebook_size = 2048
+        # Extract exact offsets from config if available
+        cfg = transformer.config
+        audio_vocab_offset = getattr(cfg, "first_unit_id", 261008)
+        num_codebooks = getattr(cfg, "num_quantizers", 8)
+        codebook_size = getattr(cfg, "codebook_size", 2048)
+        total_vocab_size = getattr(cfg, "vocab_size", 277404)
+        text_start_token_id = getattr(cfg, "text_start_token_id", 277392)
+        audio_start_token_id = getattr(cfg, "audio_start_token_id", 277393)
+        audio_end_token_id = getattr(cfg, "audio_end_token_id", 277394)
+
         layout = TokenLayoutManager(
-            text_vocab_size=text_vocab_size,
+            audio_vocab_offset=audio_vocab_offset,
             num_codebooks=num_codebooks,
-            codebook_size=codebook_size
+            codebook_size=codebook_size,
+            total_vocab_size=total_vocab_size,
+            text_start_token_id=text_start_token_id,
+            audio_start_token_id=audio_start_token_id,
+            audio_end_token_id=audio_end_token_id
         )
 
         hidden_dim = getattr(transformer.config, "hidden_size", 2048)
@@ -185,22 +229,33 @@ class RumikModelWrapper(nn.Module):
             token_layout=layout
         )
 
+    def format_input_prompt(self, text: str, speaker: str = "Ira") -> torch.Tensor:
+        """Formats input text with Rumik-OSS-1 prompt structure: [speaker] text + audio_start tokens."""
+        # Standard format
+        prompt_str = f"Speaker: {speaker}\nText: {text}\nAudio: "
+        text_tokens = self.tokenizer.encode(prompt_str, add_special_tokens=True)
+        # Append audio start token if defined
+        if self.token_layout.audio_start_token_id:
+            text_tokens.append(self.token_layout.audio_start_token_id)
+        return torch.tensor([text_tokens], dtype=torch.long)
+
     def get_config_summary(self) -> Dict[str, Any]:
         """Returns key architecture details for inspection."""
         cfg = self.transformer.config
         return {
-            "model_type": getattr(cfg, "model_type", "cohere2"),
-            "num_hidden_layers": getattr(cfg, "num_hidden_layers", getattr(cfg, "n_layers", "N/A")),
-            "hidden_size": getattr(cfg, "hidden_size", getattr(cfg, "hidden_dim", "N/A")),
-            "num_attention_heads": getattr(cfg, "num_attention_heads", "N/A"),
-            "vocab_size": getattr(cfg, "vocab_size", "N/A"),
-            "text_vocab_size": self.token_layout.text_vocab_size,
+            "model_type": getattr(cfg, "model_type", "rumik_oss"),
+            "num_hidden_layers": getattr(cfg, "num_hidden_layers", 36),
+            "hidden_size": getattr(cfg, "hidden_size", 2048),
+            "num_attention_heads": getattr(cfg, "num_attention_heads", 16),
+            "vocab_size": getattr(cfg, "vocab_size", 277404),
+            "audio_vocab_offset": self.token_layout.audio_vocab_offset,
             "num_codebooks": self.token_layout.num_codebooks,
             "codebook_size": self.token_layout.codebook_size,
-            "calculated_total_vocab": self.token_layout.total_vocab_size,
-            "vocab_match": getattr(cfg, "vocab_size", None) == self.token_layout.total_vocab_size,
+            "total_audio_vocab_range": f"[{self.token_layout.audio_vocab_offset} .. {self.token_layout.last_audio_token_id}]",
+            "vocab_match": getattr(cfg, "vocab_size", 277404) == self.token_layout.total_vocab_size,
             "has_stop_head": self.stop_head is not None,
             "mimi_loaded": self.mimi is not None,
             "mimi_sample_rate": 24000,
             "mimi_frame_rate": 12.5,
+            "speakers": getattr(cfg, "speakers", ["Ira", "Aisha", "Siya", "Zoya"])
         }

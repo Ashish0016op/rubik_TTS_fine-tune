@@ -157,6 +157,7 @@ class StreamingEngine:
     def stream_generate(
         self,
         prompt_text: str,
+        speaker: str = "Ira",
         speaker_audio: Optional[torch.Tensor] = None,
         max_frames: int = 250, # ~20 seconds
         temperature: float = 0.7,
@@ -176,9 +177,12 @@ class StreamingEngine:
         metrics = StreamingMetrics()
         first_audio_yielded = False
 
-        # 1. Tokenize text prompt
-        text_ids = self.tokenizer.encode(prompt_text, add_special_tokens=True)
-        input_ids = torch.tensor([text_ids], dtype=torch.long, device=self.device)
+        # 1. Tokenize and format prompt
+        if hasattr(self.wrapper, "format_input_prompt"):
+            input_ids = self.wrapper.format_input_prompt(prompt_text, speaker=speaker).to(self.device)
+        else:
+            text_ids = self.tokenizer.encode(prompt_text, add_special_tokens=True)
+            input_ids = torch.tensor([text_ids], dtype=torch.long, device=self.device)
 
         # 2. Handle optional speaker prefix injection
         if speaker_audio is not None and self.speaker_module is not None:
