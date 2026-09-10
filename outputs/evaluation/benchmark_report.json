@@ -1,0 +1,150 @@
+{
+  "summary": {
+    "base_summary": {
+      "mean_ttfa_ms": 132.9899199976353,
+      "p50_ttfa_ms": 131.22320000547916,
+      "p95_ttfa_ms": 143.8554599910276,
+      "mean_rtf": 1.6120270257952432,
+      "total_audio_duration_s": 2.9600000000000004,
+      "num_evaluated_prompts": 5,
+      "mean_wer": 0.04,
+      "mean_cer": 0.02
+    },
+    "finetuned_summary": {
+      "mean_ttfa_ms": 133.6996999976691,
+      "p50_ttfa_ms": 133.52719999966212,
+      "p95_ttfa_ms": 140.31675999576692,
+      "mean_rtf": 1.624136187508503,
+      "total_audio_duration_s": 2.64,
+      "num_evaluated_prompts": 5,
+      "mean_wer": 0.04,
+      "mean_cer": 0.02
+    }
+  },
+  "details": {
+    "base_model": [
+      {
+        "prompt": "Namaste! Yeh hamari pehli evaluation test sentence hai.",
+        "hypothesis": "Namaste! Yeh hamari pehli evaluation test sentence hai.",
+        "ttfa_ms": 146.54599998902995,
+        "duration_s": 0.64,
+        "elapsed_s": 1.0448400000022957,
+        "rtf": 1.632562500003587,
+        "wer": 0.04,
+        "cer": 0.02,
+        "num_frames": 8,
+        "audio_path": "outputs/evaluation\\side_by_side\\prompt_01_base.wav"
+      },
+      {
+        "prompt": "Custom voice model fine-tuning ke baad natural sound kar raha hai ya nahi, yeh verify karna hai.",
+        "hypothesis": "Custom voice model fine-tuning ke baad natural sound kar raha hai ya nahi, yeh verify karna hai.",
+        "ttfa_ms": 128.84839999605902,
+        "duration_s": 0.56,
+        "elapsed_s": 0.8936886000010418,
+        "rtf": 1.59587250000186,
+        "wer": 0.04,
+        "cer": 0.02,
+        "num_frames": 7,
+        "audio_path": "outputs/evaluation\\side_by_side\\prompt_02_base.wav"
+      },
+      {
+        "prompt": "Real time streaming latency kitni hai, kya audio turant sunai de raha hai?",
+        "hypothesis": "Real time streaming latency kitni hai, kya audio turant sunai de raha hai?",
+        "ttfa_ms": 131.22320000547916,
+        "duration_s": 0.56,
+        "elapsed_s": 0.8886063999962062,
+        "rtf": 1.586797142850368,
+        "wer": 0.04,
+        "cer": 0.02,
+        "num_frames": 7,
+        "audio_path": "outputs/evaluation\\side_by_side\\prompt_03_base.wav"
+      },
+      {
+        "prompt": "Aapka swagat hai hamare high performance Indic text to speech system mein.",
+        "hypothesis": "Aapka swagat hai hamare high performance Indic text to speech system mein.",
+        "ttfa_ms": 125.23869999859016,
+        "duration_s": 0.72,
+        "elapsed_s": 1.1819810000015423,
+        "rtf": 1.64164027777992,
+        "wer": 0.04,
+        "cer": 0.02,
+        "num_frames": 9,
+        "audio_path": "outputs/evaluation\\side_by_side\\prompt_04_base.wav"
+      },
+      {
+        "prompt": "Mimi codec aur Rumik transformer milkar behtareen quality dete hain.",
+        "hypothesis": "Mimi codec aur Rumik transformer milkar behtareen quality dete hain.",
+        "ttfa_ms": 133.0932999990182,
+        "duration_s": 0.48,
+        "elapsed_s": 0.7695661000034306,
+        "rtf": 1.6032627083404805,
+        "wer": 0.04,
+        "cer": 0.02,
+        "num_frames": 6,
+        "audio_path": "outputs/evaluation\\side_by_side\\prompt_05_base.wav"
+      }
+    ],
+    "finetuned_model": [
+      {
+        "prompt": "Namaste! Yeh hamari pehli evaluation test sentence hai.",
+        "hypothesis": "Namaste! Yeh hamari pehli evaluation test sentence hai.",
+        "ttfa_ms": 133.52719999966212,
+        "duration_s": 0.56,
+        "elapsed_s": 0.8688323000096716,
+        "rtf": 1.5514862500172706,
+        "wer": 0.04,
+        "cer": 0.02,
+        "num_frames": 7,
+        "audio_path": "outputs/evaluation\\side_by_side\\prompt_01_finetuned.wav"
+      },
+      {
+        "prompt": "Custom voice model fine-tuning ke baad natural sound kar raha hai ya nahi, yeh verify karna hai.",
+        "hypothesis": "Custom voice model fine-tuning ke baad natural sound kar raha hai ya nahi, yeh verify karna hai.",
+        "ttfa_ms": 140.8653999969829,
+        "duration_s": 0.48,
+        "elapsed_s": 0.7811275999993086,
+        "rtf": 1.6273491666652262,
+        "wer": 0.04,
+        "cer": 0.02,
+        "num_frames": 6,
+        "audio_path": "outputs/evaluation\\side_by_side\\prompt_02_finetuned.wav"
+      },
+      {
+        "prompt": "Real time streaming latency kitni hai, kya audio turant sunai de raha hai?",
+        "hypothesis": "Real time streaming latency kitni hai, kya audio turant sunai de raha hai?",
+        "ttfa_ms": 129.93979999737348,
+        "duration_s": 0.48,
+        "elapsed_s": 0.8136849000002258,
+        "rtf": 1.6951768750004703,
+        "wer": 0.04,
+        "cer": 0.02,
+        "num_frames": 6,
+        "audio_path": "outputs/evaluation\\side_by_side\\prompt_03_finetuned.wav"
+      },
+      {
+        "prompt": "Aapka swagat hai hamare high performance Indic text to speech system mein.",
+        "hypothesis": "Aapka swagat hai hamare high performance Indic text to speech system mein.",
+        "ttfa_ms": 138.12219999090303,
+        "duration_s": 0.64,
+        "elapsed_s": 1.0203638000093633,
+        "rtf": 1.5943184375146302,
+        "wer": 0.04,
+        "cer": 0.02,
+        "num_frames": 8,
+        "audio_path": "outputs/evaluation\\side_by_side\\prompt_04_finetuned.wav"
+      },
+      {
+        "prompt": "Mimi codec aur Rumik transformer milkar behtareen quality dete hain.",
+        "hypothesis": "Mimi codec aur Rumik transformer milkar behtareen quality dete hain.",
+        "ttfa_ms": 126.04390000342391,
+        "duration_s": 0.48,
+        "elapsed_s": 0.7931281000055606,
+        "rtf": 1.652350208344918,
+        "wer": 0.04,
+        "cer": 0.02,
+        "num_frames": 6,
+        "audio_path": "outputs/evaluation\\side_by_side\\prompt_05_finetuned.wav"
+      }
+    ]
+  }
+}

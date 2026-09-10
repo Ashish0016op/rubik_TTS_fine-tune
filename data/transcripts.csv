@@ -1,0 +1,6 @@
+audio_path,transcript,speaker_id
+sample_001.wav,Namaste! Yeh hamara pehla fine-tuning sample hai.,custom_speaker_01
+sample_002.wav,Aapka swagat hai hamare custom voice model training mein.,custom_speaker_01
+sample_003.wav,"Kripya dhyan dein, hum Mimi codec aur Rumik model ka upayog kar rahe hain.",custom_speaker_01
+sample_004.wav,Streaming inference se audio turant play hona shuru ho jayega.,custom_speaker_01
+sample_005.wav,Yeh voice adaptation bahut hi tez aur effective hai.,custom_speaker_01

@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rumik TTS | Real-Time Voice Streaming Engine</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #090d16;
+            --bg-secondary: #111827;
+            --bg-card: rgba(17, 24, 39, 0.7);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --accent-cyan: #00f2fe;
+            --accent-purple: #9d4edd;
+            --accent-emerald: #10b981;
+            --accent-rose: #f43f5e;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --radius-lg: 16px;
+            --radius-md: 10px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-primary);
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(157, 78, 221, 0.15) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(0, 242, 254, 0.12) 0px, transparent 50%);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem 1rem;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 950px;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .brand-title {
+            font-size: 1.75rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #00f2fe 0%, #9d4edd 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .badge {
+            font-size: 0.75rem;
+            padding: 0.25rem 0.6rem;
+            border-radius: 9999px;
+            background: rgba(0, 242, 254, 0.15);
+            border: 1px solid rgba(0, 242, 254, 0.3);
+            color: var(--accent-cyan);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .status-pill {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            background: var(--bg-card);
+            padding: 0.4rem 0.8rem;
+            border-radius: 9999px;
+            border: 1px solid var(--border-color);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--accent-emerald);
+            box-shadow: 0 0 10px var(--accent-emerald);
+        }
+
+        .status-dot.idle {
+            background-color: #64748b;
+            box-shadow: none;
+        }
+
+        .status-dot.streaming {
+            background-color: var(--accent-cyan);
+            box-shadow: 0 0 12px var(--accent-cyan);
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.8; }
+        }
+
+        .card {
+            background: var(--bg-card);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+
+        .section-title {
+            font-size: 0.95rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 0.75rem;
+            font-weight: 600;
+        }
+
+        .prompt-input {
+            width: 100%;
+            height: 110px;
+            background: rgba(10, 14, 23, 0.8);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            color: var(--text-main);
+            font-size: 1.05rem;
+            resize: none;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .prompt-input:focus {
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 0 2px rgba(0, 242, 254, 0.2);
+        }
+
+        .presets-row {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .preset-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            padding: 0.4rem 0.8rem;
+            border-radius: var(--radius-md);
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .preset-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-main);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .controls-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        .control-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        input[type=range] {
+            accent-color: var(--accent-cyan);
+        }
+
+        .actions-row {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.25rem;
+        }
+
+        .btn-stream {
+            flex: 2;
+            background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+            border: none;
+            border-radius: var(--radius-md);
+            padding: 0.9rem 1.5rem;
+            font-size: 1rem;
+            font-weight: 600;
+            color: #050b14;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+
+        .btn-stream:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(0, 242, 254, 0.4);
+        }
+
+        .btn-stream:active {
+            transform: translateY(0);
+        }
+
+        .btn-stream:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-stop {
+            flex: 1;
+            background: rgba(244, 63, 94, 0.15);
+            border: 1px solid rgba(244, 63, 94, 0.3);
+            border-radius: var(--radius-md);
+            padding: 0.9rem 1rem;
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--accent-rose);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn-stop:hover {
+            background: rgba(244, 63, 94, 0.25);
+        }
+
+        .visualizer-container {
+            height: 120px;
+            background: rgba(7, 10, 19, 0.9);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            position: relative;
+            border: 1px solid var(--border-color);
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .metric-box {
+            background: rgba(10, 14, 23, 0.6);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 0.85rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .metric-name {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+        }
+
+        .metric-value {
+            font-size: 1.35rem;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-main);
+        }
+
+        .metric-value.highlight {
+            color: var(--accent-cyan);
+        }
+
+        @media (max-width: 640px) {
+            .metrics-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="brand-title">
+                Rumik TTS
+                <span class="badge">Real-Time Mimi Stream</span>
+            </div>
+            <div class="status-pill">
+                <div class="status-dot idle" id="status-dot"></div>
+                <span id="status-text">Disconnected</span>
+            </div>
+        </header>
+
+        <div class="card">
+            <div class="section-title">Romanized Hindi Prompt</div>
+            <textarea id="prompt-input" class="prompt-input" placeholder="Type or select a Romanized Hindi prompt to stream...">Namaste! Yeh hamari real-time streaming custom voice model ka live demonstration hai. Audio turant play hona shuru ho jata hai bina response khatam hone ka wait kiye.</textarea>
+            
+            <div class="presets-row">
+                <button class="preset-btn" onclick="setPreset('Namaste! Aapka swagat hai hamare custom voice model test mein.')">Greeting</button>
+                <button class="preset-btn" onclick="setPreset('Yeh streaming engine Mimi codec ke saath 24kHz audio bahut low latency mein generate karta hai.')">Technical Info</button>
+                <button class="preset-btn" onclick="setPreset('Aaj ka mausam bahut suhana hai, kripya bataiye main aapki kya sahayata kar sakta hoon?')">Assistant</button>
+            </div>
+
+            <div class="controls-grid">
+                <div class="control-group">
+                    <div class="control-label">
+                        <span>Temperature</span>
+                        <span id="temp-val">0.7</span>
+                    </div>
+                    <input type="range" id="temp-slider" min="0.1" max="1.5" step="0.05" value="0.7" oninput="updateVal('temp-val', this.value)">
+                </div>
+                <div class="control-group">
+                    <div class="control-label">
+                        <span>Top-P</span>
+                        <span id="top-p-val">0.95</span>
+                    </div>
+                    <input type="range" id="top-p-slider" min="0.1" max="1.0" step="0.05" value="0.95" oninput="updateVal('top-p-val', this.value)">
+                </div>
+                <div class="control-group">
+                    <div class="control-label">
+                        <span>Max Frames</span>
+                        <span id="frames-val">200 (~16s)</span>
+                    </div>
+                    <input type="range" id="frames-slider" min="20" max="400" step="10" value="200" oninput="updateFramesVal(this.value)">
+                </div>
+            </div>
+
+            <div class="actions-row">
+                <button id="stream-btn" class="btn-stream" onclick="startStreaming()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                    Start Real-Time Stream
+                </button>
+                <button id="stop-btn" class="btn-stop" onclick="stopStreaming()">Stop</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="section-title">Live Waveform & Audio Spectrum</div>
+            <div class="visualizer-container">
+                <canvas id="visualizer-canvas"></canvas>
+            </div>
+
+            <div class="metrics-grid">
+                <div class="metric-box">
+                    <span class="metric-name">Time-To-First-Audio</span>
+                    <span class="metric-value highlight" id="metric-ttfa">-- ms</span>
+                </div>
+                <div class="metric-box">
+                    <span class="metric-name">Real-Time Factor</span>
+                    <span class="metric-value" id="metric-rtf">--</span>
+                </div>
+                <div class="metric-box">
+                    <span class="metric-name">Mimi Frames</span>
+                    <span class="metric-value" id="metric-frames">0</span>
+                </div>
+                <div class="metric-box">
+                    <span class="metric-name">Audio Duration</span>
+                    <span class="metric-value" id="metric-duration">0.0s</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let audioCtx = null;
+        let analyser = null;
+        let scheduledTime = 0;
+        let isStreaming = false;
+        let frameCounter = 0;
+
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+        const streamBtn = document.getElementById('stream-btn');
+        const canvas = document.getElementById('visualizer-canvas');
+        const canvasCtx = canvas.getContext('2d');
+
+        function updateVal(id, val) {
+            document.getElementById(id).textContent = val;
+        }
+
+        function updateFramesVal(val) {
+            const sec = (val * 0.08).toFixed(1);
+            document.getElementById('frames-val').textContent = `${val} (~${sec}s)`;
+        }
+
+        function setPreset(text) {
+            document.getElementById('prompt-input').value = text;
+        }
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 256;
+                analyser.connect(audioCtx.destination);
+                drawVisualizer();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/stream`;
+            ws = new WebSocket(wsUrl);
+            ws.binaryType = 'arraybuffer';
+
+            ws.onopen = () => {
+                statusDot.className = 'status-dot';
+                statusText.textContent = 'Engine Ready';
+            };
+
+            ws.onclose = () => {
+                statusDot.className = 'status-dot idle';
+                statusText.textContent = 'Disconnected';
+                setTimeout(connectWebSocket, 3000);
+            };
+
+            ws.onmessage = (event) => {
+                if (typeof event.data === 'string') {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'start') {
+                        scheduledTime = audioCtx.currentTime + 0.05;
+                        frameCounter = 0;
+                        document.getElementById('metric-frames').textContent = '0';
+                        document.getElementById('metric-duration').textContent = '0.0s';
+                    } else if (msg.type === 'meta' && msg.event === 'first_chunk') {
+                        document.getElementById('metric-ttfa').textContent = `${msg.ttfa_ms} ms`;
+                    } else if (msg.type === 'end') {
+                        statusDot.className = 'status-dot';
+                        statusText.textContent = 'Completed';
+                        streamBtn.disabled = false;
+                        isStreaming = false;
+                        document.getElementById('metric-duration').textContent = `${msg.total_duration_s}s`;
+                    }
+                } else if (event.data instanceof ArrayBuffer) {
+                    // Binary raw PCM chunk (16-bit signed integer, 24kHz mono)
+                    playPcmChunk(event.data);
+                }
+            };
+        }
+
+        function playPcmChunk(arrayBuffer) {
+            if (!audioCtx) return;
+            const int16Array = new Int16Array(arrayBuffer);
+            const float32Array = new Float32Array(int16Array.length);
+            for (let i = 0; i < int16Array.length; i++) {
+                float32Array[i] = int16Array[i] / 32768.0;
+            }
+
+            const audioBuffer = audioCtx.createBuffer(1, float32Array.length, 24000);
+            audioBuffer.copyToChannel(float32Array, 0, 0);
+
+            const source = audioCtx.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(analyser);
+
+            if (scheduledTime < audioCtx.currentTime) {
+                scheduledTime = audioCtx.currentTime;
+            }
+
+            source.start(scheduledTime);
+            scheduledTime += audioBuffer.duration;
+
+            frameCounter += 1;
+            document.getElementById('metric-frames').textContent = frameCounter;
+            document.getElementById('metric-duration').textContent = `${(frameCounter * 0.08).toFixed(1)}s`;
+        }
+
+        function startStreaming() {
+            initAudio();
+            const prompt = document.getElementById('prompt-input').value;
+            if (!prompt.trim()) return;
+
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert("Connecting to streaming server...");
+                connectWebSocket();
+                return;
+            }
+
+            isStreaming = true;
+            streamBtn.disabled = true;
+            statusDot.className = 'status-dot streaming';
+            statusText.textContent = 'Streaming Live Audio...';
+
+            ws.send(JSON.stringify({
+                prompt: prompt,
+                temperature: parseFloat(document.getElementById('temp-slider').value),
+                top_p: parseFloat(document.getElementById('top-p-slider').value),
+                max_frames: parseInt(document.getElementById('frames-slider').value)
+            }));
+        }
+
+        function stopStreaming() {
+            if (isStreaming && ws) {
+                ws.close();
+                isStreaming = false;
+                streamBtn.disabled = false;
+                statusDot.className = 'status-dot';
+                statusText.textContent = 'Stopped';
+            }
+        }
+
+        function drawVisualizer() {
+            requestAnimationFrame(drawVisualizer);
+            if (!analyser) return;
+
+            canvas.width = canvas.clientWidth;
+            canvas.height = canvas.clientHeight;
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            analyser.getByteFrequencyData(dataArray);
+
+            canvasCtx.fillStyle = 'rgba(7, 10, 19, 0.9)';
+            canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const barWidth = (canvas.width / bufferLength) * 2.5;
+            let x = 0;
+
+            for (let i = 0; i < bufferLength; i++) {
+                const barHeight = (dataArray[i] / 255.0) * canvas.height;
+                const gradient = canvasCtx.createLinearGradient(0, canvas.height, 0, canvas.height - barHeight);
+                gradient.addColorStop(0, '#00f2fe');
+                gradient.addColorStop(1, '#9d4edd');
+
+                canvasCtx.fillStyle = gradient;
+                canvasCtx.fillRect(x, canvas.height - barHeight, barWidth - 1, barHeight);
+                x += barWidth;
+            }
+        }
+
+        window.onload = () => {
+            connectWebSocket();
+        };
+    </script>
+</body>
+</html>
