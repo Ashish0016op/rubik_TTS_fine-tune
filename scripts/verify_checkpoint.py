@@ -106,24 +106,33 @@ def run_verification(
     print(f"\n=== Single-Utterance Test Synthesis ===")
     print(f"Prompt: '{test_prompt}'")
     
-    # Format prompt for Rumik-OSS-1
-    input_ids = wrapper.format_input_prompt(test_prompt, speaker="Ira").to(device)
-    print(f"Prompt text tokens count: {input_ids.shape[1]}")
+    # Format prompt with official Rumik-OSS-1 prompt template
+    test_speaker = "Ira"
+    test_description = "clear natural Hindi pronunciation, standard pace, friendly expressive tone"
+    input_ids = wrapper.format_input_prompt(
+        text=test_prompt,
+        speaker=test_speaker,
+        description=test_description
+    ).to(device)
+    print(f"Formatted prompt token count: {input_ids.shape[1]}")
 
-    # Generate audio tokens
+    # Generate audio tokens with top_k=30 and temperature=0.8
+    print("[*] Generating audio token sequence...")
     with torch.no_grad():
         generated_ids = wrapper.transformer.generate(
             input_ids=input_ids,
-            max_new_tokens=200,
+            max_new_tokens=400, # generate up to ~4 seconds (400 / 100 tokens/s)
             do_sample=True,
-            temperature=0.7,
-            top_p=0.95,
+            temperature=0.8,
+            top_k=30,
+            top_p=0.9,
+            repetition_penalty=1.05,
             eos_token_id=wrapper.token_layout.audio_end_token_id,
             pad_token_id=wrapper.tokenizer.pad_token_id or 0
         )
         
     audio_tokens = generated_ids[:, input_ids.shape[1]:]
-    print(f"Generated {audio_tokens.shape[1]} audio tokens.")
+    print(f"Generated {audio_tokens.shape[1]} audio tokens ({audio_tokens.shape[1] // 8} frames).")
 
     # Decode via Mimi
     if wrapper.mimi is not None and audio_tokens.shape[1] >= 8:

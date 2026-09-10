@@ -37,9 +37,11 @@ class RumikTTSDataset(Dataset):
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         item = self.examples[idx]
         
-        # 1. Tokenize romanized Hindi text prompt
+        # 1. Tokenize text prompt with official template <text>{speaker}: <description="..."> {text}<audio>
         text = item["transcript"]
-        text_tokens = self.tokenizer.encode(text, add_special_tokens=True)
+        speaker = item.get("speaker_id", "Ira")
+        formatted_prompt = f'<text>{speaker}: <description="natural clear Hindi pronunciation"> {text}<audio>'
+        text_tokens = self.tokenizer.encode(formatted_prompt, add_special_tokens=True)
         text_tensor = torch.tensor(text_tokens, dtype=torch.long)
         
         # 2. Get audio codes [8, num_frames] or flattened tokens

@@ -341,17 +341,28 @@
             <div class="controls-grid">
                 <div class="control-group">
                     <div class="control-label">
-                        <span>Temperature</span>
-                        <span id="temp-val">0.7</span>
+                        <span>Voice Speaker</span>
                     </div>
-                    <input type="range" id="temp-slider" min="0.1" max="1.5" step="0.05" value="0.7" oninput="updateVal('temp-val', this.value)">
+                    <select id="speaker-select" style="background: rgba(10, 14, 23, 0.8); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem; color: var(--text-main); font-size: 0.95rem; outline: none;">
+                        <option value="Ira" selected>Ira (Default)</option>
+                        <option value="Aisha">Aisha</option>
+                        <option value="Siya">Siya</option>
+                        <option value="Zoya">Zoya</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <div class="control-label">
+                        <span>Temperature</span>
+                        <span id="temp-val">0.8</span>
+                    </div>
+                    <input type="range" id="temp-slider" min="0.1" max="1.5" step="0.05" value="0.8" oninput="updateVal('temp-val', this.value)">
                 </div>
                 <div class="control-group">
                     <div class="control-label">
                         <span>Top-P</span>
-                        <span id="top-p-val">0.95</span>
+                        <span id="top-p-val">0.9</span>
                     </div>
-                    <input type="range" id="top-p-slider" min="0.1" max="1.0" step="0.05" value="0.95" oninput="updateVal('top-p-val', this.value)">
+                    <input type="range" id="top-p-slider" min="0.1" max="1.0" step="0.05" value="0.9" oninput="updateVal('top-p-val', this.value)">
                 </div>
                 <div class="control-group">
                     <div class="control-label">
@@ -509,6 +520,7 @@
         function startStreaming() {
             initAudio();
             const prompt = document.getElementById('prompt-input').value;
+            const speaker = document.getElementById('speaker-select').value;
             if (!prompt.trim()) return;
 
             if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -524,6 +536,7 @@
 
             ws.send(JSON.stringify({
                 prompt: prompt,
+                speaker: speaker,
                 temperature: parseFloat(document.getElementById('temp-slider').value),
                 top_p: parseFloat(document.getElementById('top-p-slider').value),
                 max_frames: parseInt(document.getElementById('frames-slider').value)

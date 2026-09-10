@@ -229,14 +229,17 @@ class RumikModelWrapper(nn.Module):
             token_layout=layout
         )
 
-    def format_input_prompt(self, text: str, speaker: str = "Ira") -> torch.Tensor:
-        """Formats input text with Rumik-OSS-1 prompt structure: [speaker] text + audio_start tokens."""
-        # Standard format
-        prompt_str = f"Speaker: {speaker}\nText: {text}\nAudio: "
+    def format_input_prompt(
+        self,
+        text: str,
+        speaker: str = "Ira",
+        description: str = "natural, clear Hindi pronunciation, conversational tone"
+    ) -> torch.Tensor:
+        """Formats input text with official Rumik-OSS-1 prompt structure:
+        <text>{speaker}: <description="{description}"> {text}<audio>
+        """
+        prompt_str = f'<text>{speaker}: <description="{description}"> {text}<audio>'
         text_tokens = self.tokenizer.encode(prompt_str, add_special_tokens=True)
-        # Append audio start token if defined
-        if self.token_layout.audio_start_token_id:
-            text_tokens.append(self.token_layout.audio_start_token_id)
         return torch.tensor([text_tokens], dtype=torch.long)
 
     def get_config_summary(self) -> Dict[str, Any]:

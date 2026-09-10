@@ -129,8 +129,9 @@ async def websocket_stream_endpoint(websocket: WebSocket):
             data = await websocket.receive_text()
             req = json.loads(data)
             prompt = req.get("prompt", "")
-            temperature = float(req.get("temperature", 0.7))
-            top_p = float(req.get("top_p", 0.95))
+            speaker = req.get("speaker", "Ira")
+            temperature = float(req.get("temperature", 0.8))
+            top_p = float(req.get("top_p", 0.9))
             max_frames = int(req.get("max_frames", 200))
             
             if not prompt.strip():
@@ -143,12 +144,14 @@ async def websocket_stream_endpoint(websocket: WebSocket):
                 "sample_rate": 24000,
                 "channels": 1,
                 "format": "pcm_s16le",
+                "speaker": speaker,
                 "prompt": prompt
             })
 
             # Stream audio frames
             generator = streaming_engine.stream_generate(
                 prompt_text=prompt,
+                speaker=speaker,
                 max_frames=max_frames,
                 temperature=temperature,
                 top_p=top_p
