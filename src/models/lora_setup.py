@@ -5,6 +5,17 @@ import torch.nn as nn
 from typing import List, Optional
 try:
     from peft import LoraConfig, get_peft_model, TaskType, PeftModel
+    try:
+        import peft.import_utils
+        peft.import_utils.is_torchao_available = lambda: False
+    except Exception:
+        pass
+    try:
+        import peft.tuners.lora.torchao as peft_torchao
+        peft_torchao.is_torchao_available = lambda: False
+        peft_torchao.dispatch_torchao = lambda *args, **kwargs: None
+    except Exception:
+        pass
 except ImportError:
     LoraConfig = None
     get_peft_model = None

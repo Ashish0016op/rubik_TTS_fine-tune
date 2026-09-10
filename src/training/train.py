@@ -167,6 +167,9 @@ class RumikFineTuner:
             total_loss += metrics["total_loss"]
             steps += 1
 
+        avg_val_loss = total_loss / max(1, steps)
+        return {"val_loss": avg_val_loss}
+
     def save_checkpoint(self, output_dir: str, clean_existing: bool = True):
         """Saves fine-tuned LoRA weights and optional speaker encoder, removing old checkpoint files to retain only one."""
         import shutil

@@ -7,6 +7,16 @@ import json
 import torch
 from torch.utils.data import DataLoader
 
+# Kaggle / Colab compatibility patch for older pre-installed torchao (<0.16.0)
+try:
+    import peft.import_utils
+    peft.import_utils.is_torchao_available = lambda: False
+    import peft.tuners.lora.torchao as peft_torchao
+    peft_torchao.is_torchao_available = lambda: False
+    peft_torchao.dispatch_torchao = lambda *args, **kwargs: None
+except Exception:
+    pass
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.models.model_utils import RumikModelWrapper, TokenLayoutManager
@@ -60,7 +70,7 @@ def run_finetuning(
         print("\n[!] Running training simulation / test loop...")
         # Create small test model architecture to verify forward/backward pass & LoRA hooks
         class MockConfig:
-            def __init__(self, hidden_size, vocab_size):
+            def __init__(self, hidden_size, vocab_size=277404):
                 self.hidden_size = hidden_size
                 self.vocab_size = vocab_size
                 self.is_encoder_decoder = False
@@ -72,7 +82,7 @@ def run_finetuning(
                 return key in self.to_dict()
 
         class MockBackbone(torch.nn.Module):
-            def __init__(self, vocab_size=272384, hidden_size=256):
+            def __init__(self, vocab_size=277404, hidden_size=256):
                 super().__init__()
                 self.config = MockConfig(hidden_size, vocab_size)
                 self.generation_config = None
